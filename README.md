@@ -23,7 +23,6 @@ This approach is particularly well-suited for models with:
 - **Multiple Pre-built Models:**
   - Real Business Cycle (RBC) model with irreversible investment
   - Diamond-Mortensen-Pissarides (DMP) search and matching model
-  - Endogenous disaster models
 
 - **Efficient Numerical Methods:**
   - Sparse grid state space representation (drastically reduces grid points)
@@ -144,10 +143,6 @@ Search and matching model of unemployment with Hagedorn-Manovskii calibration:
 - Matching function with congestion effects
 
 **Key parameters:** Bargaining power (η), separation rate (s), matching efficiency (κ)
-
-### 3. Endogenous Disasters Model (`dmp_end`)
-
-Extensions incorporating rare disaster risk and time-varying disaster probability.
 
 ## Methodology
 
