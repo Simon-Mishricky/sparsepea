@@ -218,9 +218,3 @@ MIT License - see LICENSE file for details
 **Simon Mishricky**  
 Email: simon.mishricky@gmail.com  
 Website: [simon-mishricky.github.io](https://simon-mishricky.github.io)
-
-## Acknowledgments
-
-This work was developed as part of my PhD research at the Australian National University under the supervision of Sephorah Mangin, John Stachurski, and Fedor Iskhakov. I am grateful for their guidance and support.
-
-Special thanks to the QuantEcon project and the Tasmanian Sparse Grids library developers for their excellent open-source tools.
