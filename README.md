@@ -217,4 +217,4 @@ MIT License - see LICENSE file for details
 
 **Simon Mishricky**  
 Email: simon.mishricky@gmail.com  
-Website: [simon-mishricky.github.io](https://simon-mishricky.github.io)
+Website: [github.com/Simon-Mishricky](https://github.com/Simon-Mishricky)
