@@ -6,7 +6,6 @@ models using the Parameterized Expectations Algorithm (PEA) with sparse
 grid interpolation.
 
 Author: Simon Mishricky
-Affiliation: Australian National University
 
 Example:
     >>> from sparsepea.models import rbc_jit

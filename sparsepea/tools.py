@@ -1,3 +1,22 @@
+"""
+Sparse-grid PEA solver and diagnostic tools.
+
+This module provides the :class:`tools` class, which wraps a DSGE model
+object and solves for the parameterised expectation function using Tasmanian
+sparse grids for interpolation and quadrature.
+
+The solver implements the following workflow:
+    1. Construct a sparse grid over the state space (``make_states_grid``)
+    2. Construct a quadrature grid for shock integration (``make_shocks_grid``)
+    3. Iterate on the PEA fixed-point mapping (``compute_solution``)
+    4. Visualise policy functions and Euler residuals (``plot_*`` methods)
+
+Dependencies
+------------
+- Tasmanian (https://tasmanian.ornl.gov/) for sparse grid construction
+- Matplotlib for 3D surface and histogram plots
+"""
+
 import numpy as np 
 from numba import float64
 from numba.experimental import jitclass
@@ -7,6 +26,31 @@ import matplotlib.cm as cm
 from math import *
 
 class tools:
+    """Sparse-grid PEA solver for DSGE models with occasionally binding constraints.
+    
+    Parameters
+    ----------
+    model : object
+        A JIT-compiled model instance (e.g. ``rbc_jit`` or ``dmp_jit``) 
+        implementing the PEA interface: ``x_axis_grid``, ``rhs_euler``,
+        ``c_implied``, and ``ar1_conditional_density``.
+    states_input : int
+        Number of state variables (default 2).
+    states_output : int
+        Output dimension of the state grid (default 1).
+    shocks_input : int
+        Number of shock dimensions (default 1).
+    shocks_output : int
+        Output dimension of the shock grid (default 1).
+    depth : int
+        Tasmanian sparse grid refinement level (default 8).
+    order : int
+        Local polynomial order (default 1).
+    max_iter : int
+        Maximum PEA iterations (default 500).
+    tol : float
+        Convergence tolerance on the sup-norm (default 1e-5).
+    """
     
     def __init__(self,
                  model,                   # Input of a chosen model
@@ -151,7 +195,7 @@ class tools:
         x_grid = np.atleast_2d(grid_states.getPoints()[:, 0])
         y_grid = np.atleast_2d(grid_states.getPoints()[:, 1])
         
-        fig = plt.figure(figsize=(10,7))
+        fig = plt.figure(figsize=(10, 7), dpi=100)
         ax = fig.add_subplot(111, projection='3d')
         x_reg_mesh, y_reg_mesh = np.meshgrid(xy_grid[:, 0], xy_grid[:, 1])
 
@@ -159,22 +203,33 @@ class tools:
                         x_reg_mesh,
                         c_interp.T,
                         rstride=2, cstride=2,
-                        color='grey',
-                        alpha=0.9,
-                        linewidth=0.25, 
-                        edgecolor="none")
+                        cmap='coolwarm',
+                        alpha=0.85,
+                        linewidth=0.1, 
+                        edgecolor='none')
 
         ax.scatter3D(y_grid,
                      x_grid,
                      c_grid,
-                     color='black')
+                     color='black',
+                     s=6,
+                     alpha=0.6,
+                     zorder=5)
 
-        ax.set_zlabel('Policy Function', fontsize=14)
+        ax.set_xlabel('Shock', fontsize=10, labelpad=10)
+        ax.set_ylabel('State', fontsize=10, labelpad=10)
+        ax.tick_params(axis='both', labelsize=8)
         ax.view_init(40, 135)
+        # Manually place z-axis label and title using figure coordinates
+        # because matplotlib 3D clips set_zlabel at this viewing angle
+        fig.text(0.82, 0.5, 'Policy Function', va='center', ha='center',
+                 fontsize=10, rotation=90)
+        fig.text(0.53, 0.91, 'Policy Function', ha='center', fontsize=13)
         plt.show()
         
     def plot_errors_3d(self, e):
-        '''This function plots a 3D diagram of the Euler residuals'''
+        '''This function plots the Euler residuals as a 3D surface alongside
+           their distribution in a side-by-side figure'''
         
         model = self.model
         xy_fine = self.xy_fine
@@ -189,31 +244,58 @@ class tools:
         
         self.error = np.abs((c_fine - c_implied) / c_implied)
         
-        fig = plt.figure(figsize=(10,7))
-        ax = fig.add_subplot(111, projection='3d')
+        # Create side-by-side figure: 3D surface + histogram
+        fig = plt.figure(figsize=(14, 5.5), dpi=100)
+        gs = fig.add_gridspec(1, 2, width_ratios=[1.2, 1], wspace=0.25)
+        
+        # Left panel: 3D surface of Euler residuals
+        ax1 = fig.add_subplot(gs[0], projection='3d')
         x_reg_mesh, y_reg_mesh = np.meshgrid(xy_fine[:, 0], xy_fine[:, 1])
 
-        ax.plot_surface(y_reg_mesh,
+        ax1.plot_surface(y_reg_mesh,
                         x_reg_mesh,
                         self.error.T,
-                        antialiased=False,
-                        alpha=0.3,
-                        linewidth=0.0)
+                        cmap='viridis',
+                        alpha=0.7,
+                        linewidth=0.0,
+                        antialiased=True)
 
-        ax.set_zlabel('Euler Residuals', fontsize=14)
-        ax.view_init(40, 135)
+        ax1.set_xlabel('Shock', fontsize=9, labelpad=10)
+        ax1.set_ylabel('State', fontsize=9, labelpad=10)
+        ax1.tick_params(axis='both', labelsize=7)
+        ax1.view_init(40, 135)
+        
+        # Right panel: histogram of Euler residuals
+        ax2 = fig.add_subplot(gs[1])
+        error_array = np.concatenate(self.error, axis=0)
+        ax2.hist(error_array, 50, color='#2196F3', alpha=0.75, edgecolor='white', linewidth=0.5)
+        ax2.set_xlabel('$|\\varepsilon|$', fontsize=10)
+        ax2.set_ylabel('Frequency', fontsize=10)
+        ax2.tick_params(axis='both', labelsize=8)
+        ax2.grid(True, alpha=0.2, linestyle='--')
+        ax2.spines['top'].set_visible(False)
+        ax2.spines['right'].set_visible(False)
+        
+        fig.suptitle('Euler Equation Residuals', fontsize=13, y=0.95)
         plt.show()
         
     def plot_errors_dist(self):
-        '''This function plots this distribution of the Euler residuals'''
+        '''This function plots the distribution of the Euler residuals.
+           Note: plot_errors_3d now includes the distribution as a side panel,
+           but this method is kept for backward compatibility.'''
         
         error = self.error
         
         error_array = np.concatenate(error, axis=0)
         bins = 50
-        fig, ax = plt.subplots(figsize=(8, 5))
-        ax.set_title('Error Distribution')
-        ax.set_xlabel('$\epsilon$')
-        ax.hist(error_array, bins, color='green', alpha=0.5, edgecolor='black')
-        ax.grid(True)
+        fig, ax = plt.subplots(figsize=(7, 4), dpi=100)
+        ax.set_title('Euler Residual Distribution', fontsize=11)
+        ax.set_xlabel('$|\\varepsilon|$', fontsize=10)
+        ax.set_ylabel('Frequency', fontsize=10)
+        ax.hist(error_array, bins, color='#2196F3', alpha=0.75, edgecolor='white', linewidth=0.5)
+        ax.tick_params(axis='both', labelsize=8)
+        ax.grid(True, alpha=0.2, linestyle='--')
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        plt.tight_layout()
         plt.show()  

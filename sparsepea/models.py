@@ -1,3 +1,39 @@
+"""
+DSGE model specifications for the SparsePEA solver.
+
+This module contains JIT-compiled model classes built with ``numba.jitclass``.
+Each model implements the interface expected by :class:`sparsepea.tools.tools`:
+
+    - ``x_axis_grid(e, grid)``           : expectations → next-period state, policy, KKT multiplier
+    - ``rhs_euler(grid, x_p, z_p, ψ_p, e, w)`` : right-hand side of the Euler equation
+    - ``c_implied(e_fine, μ_fine, grid)`` : implied policy for Euler residual diagnostics
+    - ``ar1_conditional_density(y, z)``   : transition density for the exogenous AR(1) process
+
+Models
+------
+rbc_jit
+    Real Business Cycle model with irreversible investment.
+    The planner maximises CRRA utility subject to a Cobb-Douglas production
+    function and the constraint K' >= (1-δ)K. The irreversibility constraint
+    is enforced via KKT complementarity conditions.
+
+dmp_jit
+    Diamond-Mortensen-Pissarides search-and-matching model with the
+    Hagedorn and Manovskii (2008) calibration. Features endogenous vacancy
+    posting, Nash wage bargaining, and a CES matching function. The
+    zero-vacancy constraint is enforced via KKT conditions.
+
+end_dmp_jit
+    Endogenous disaster variant of the DMP model with an alternative
+    vacancy cost specification (κ = κ₀ + κ₁·q).
+
+Notes
+-----
+Numba's ``jitclass`` does not support class inheritance, so distribution
+helper methods (norm_cdf, log_normal_cdf, etc.) are duplicated across
+model classes. This is a known trade-off for JIT compilation performance.
+"""
+
 import numpy as np
 from numba import float64
 from numba.experimental import jitclass
@@ -5,26 +41,43 @@ from math import *
 import quantecon.markov as qe
 
 
-# This class uses numba, therefore we need to specify the data types at the begining
-rbc_data = [('α', float64),                 # Production function exponent
+# =============================================================================
+# Real Business Cycle Model with Irreversible Investment
+# =============================================================================
+
+# Numba jitclass requires explicit type declarations for all instance attributes
+rbc_data = [('α', float64),                 # Production function exponent (capital share)
             ('δ', float64),                 # Depreciation rate
-            ('η', float64),                 # Utility function exponent
-            ('ρ', float64),                 # Persistence factor of AR1 process
-            ('σ', float64),                 # Conditional volatility of AR1 process
-            ('yk',float64),                 # Output - capital ratio
-            ('β', float64),                 # Discount factor
-            ('e_min', float64),
-            ('e_max', float64),
-            ('z_min', float64),             # Shock lower bound
-            ('z_max', float64),             # Shock upper bound
-            ('k_ss', float64),              # Capital steady state
-            ('k_min', float64),             # Capital lower bound
-            ('k_max', float64),             # Capital upper bound
-            ('state_bounds', float64[:]),
-            ('shock_bounds', float64[:])]
+            ('η', float64),                 # Coefficient of relative risk aversion
+            ('ρ', float64),                 # Persistence of log-TFP AR(1) process
+            ('σ', float64),                 # Conditional std dev of TFP innovation
+            ('yk',float64),                 # Steady-state output-capital ratio
+            ('β', float64),                 # Discount factor (derived from α, yk, δ)
+            ('e_min', float64),             # Innovation lower bound (±3σ)
+            ('e_max', float64),             # Innovation upper bound (±3σ)
+            ('z_min', float64),             # Unconditional TFP lower bound
+            ('z_max', float64),             # Unconditional TFP upper bound
+            ('k_ss', float64),              # Deterministic steady-state capital
+            ('k_min', float64),             # Capital grid lower bound (0.6 × k_ss)
+            ('k_max', float64),             # Capital grid upper bound (1.6 × k_ss)
+            ('state_bounds', float64[:]),    # [k_min, k_max, z_min, z_max]
+            ('shock_bounds', float64[:])]   # [z_min, z_max]
 
 @jitclass(rbc_data)
 class rbc_jit:
+    """Real Business Cycle model with an irreversible investment constraint.
+    
+    The social planner maximises:
+        v(K,Z) = max_{K'} u(C) + β E[v(K',Z') | Z]
+    subject to:
+        C = Z·K^α + (1-δ)·K - K'
+        K' >= (1-δ)·K               (irreversibility constraint)
+        ln(Z') = ρ·ln(Z) + σ·ε'    where ε' ~ N(0,1)
+    
+    The Euler equation with KKT complementarity is:
+        C^(-η) - μ = β E[C'^(-η)·(1-δ + α·Z'·K'^(α-1)) - μ'·(1-δ)]
+    where μ >= 0 is the multiplier on the irreversibility constraint.
+    """
     
     def __init__(self,
                  α=0.33,
@@ -235,29 +288,46 @@ class rbc_jit:
         
         return c_implied
     
+# =============================================================================
+# Diamond-Mortensen-Pissarides Search and Matching Model
+# =============================================================================
+
 # This class uses numba, therefore we need to specify the data types at the begining
 dmp_data = [('β', float64),                 # Discount factor
-            ('ρ', float64),                 # Persistence factor of AR1 process
-            ('σ', float64),                 # Conditional volatility of AR1 process
-            ('η', float64),                 # Workers' bargaining weight
-            ('b', float64),                 # Flow value of unemployment activities
-            ('s', float64),                 # Job separation rate
-            ('ι', float64),                 # Elasticity of the matching function
-            ('κ_k', float64),               # Capital cost parameter
-            ('κ_w', float64),               # Labour cost parameter
-            ('ξ', float64),                 # Exponential parameter for labour cost
+            ('ρ', float64),                 # Persistence of log-productivity AR(1)
+            ('σ', float64),                 # Conditional std dev of productivity innovation
+            ('η', float64),                 # Workers' Nash bargaining weight
+            ('b', float64),                 # Flow value of non-market activity
+            ('s', float64),                 # Exogenous job separation rate
+            ('ι', float64),                 # CES matching function elasticity
+            ('κ_k', float64),               # Vacancy cost — capital component
+            ('κ_w', float64),               # Vacancy cost — labour component
+            ('ξ', float64),                 # Vacancy cost exponent on labour component
             ('e_min', float64),
             ('e_max', float64),
-            ('x_min', float64),             # Shock lower bound
-            ('x_max', float64),             # Shock upper bound
-            ('n_min', float64),             # Employment lower bound    
-            ('n_max', float64),             # Employment upper bound
-            ('state_bounds', float64[:]),
-            ('shock_bounds', float64[:])]
+            ('x_min', float64),             # Productivity shock lower bound
+            ('x_max', float64),             # Productivity shock upper bound
+            ('n_min', float64),             # Employment rate lower bound    
+            ('n_max', float64),             # Employment rate upper bound
+            ('state_bounds', float64[:]),    # [n_min, n_max, x_min, x_max]
+            ('shock_bounds', float64[:])]   # [x_min, x_max]
         
 @jitclass(dmp_data)
 class dmp_jit:
-    '''This model uses the parameters from Hagedorn and Manovskii'''
+    """Diamond-Mortensen-Pissarides search model with Hagedorn-Manovskii calibration.
+    
+    The free-entry condition with KKT complementarity is:
+        κ/q(θ) - λ = β E[X' - W' + (1-s)(κ'/q(θ') - λ')]
+    where:
+        θ = V/(1-N)             labour market tightness
+        q(θ) = (1+θ^ι)^(-1/ι)  vacancy-filling rate (CES matching)
+        W = η(X + κθ) + (1-η)b Nash-bargained wage
+        κ = κ_K·X + κ_W·X^ξ    state-dependent vacancy cost
+        ln(X') = ρ·ln(X) + σε' productivity process
+    
+    The Hagedorn-Manovskii calibration sets b close to average productivity,
+    generating realistic labour-market volatility (the Shimer puzzle).
+    """
     
     def __init__(self,
                  β=0.99**(1/2),
@@ -483,6 +553,10 @@ class dmp_jit:
         
         return c_implied
 
+# =============================================================================
+# Endogenous Disaster DMP Model (alternative vacancy cost specification)
+# =============================================================================
+
 # This class uses numba, therefore we need to specify the data types at the begining
 end_dmp_data = [('β', float64),                 # Discount factor
                 ('ρ', float64),                 # Persistence factor of AR1 process
@@ -491,8 +565,8 @@ end_dmp_data = [('β', float64),                 # Discount factor
                 ('b', float64),                 # Flow value of unemployment activities
                 ('s', float64),                 # Job separation rate
                 ('ι', float64),                 # Elasticity of the matching function
-                ('κ_0', float64),               # Capital cost parameter
-                ('κ_1', float64),               # Labour cost parameter
+                ('κ_0', float64),               # Fixed vacancy cost component
+                ('κ_1', float64),               # Variable vacancy cost component
                 ('e_min', float64),
                 ('e_max', float64),
                 ('x_min', float64),             # Shock lower bound
@@ -504,7 +578,11 @@ end_dmp_data = [('β', float64),                 # Discount factor
         
 @jitclass(end_dmp_data)
 class end_dmp_jit:
-    '''This model uses the parameters from Hagedorn and Manovskii'''
+    """Endogenous disaster variant of the DMP model.
+    
+    Uses an alternative vacancy cost specification κ = κ₀ + κ₁ 
+    rather than the state-dependent κ = κ_K·X + κ_W·X^ξ in dmp_jit.
+    """
     
     def __init__(self,
                  β=0.9954,

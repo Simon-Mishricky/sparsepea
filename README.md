@@ -1,220 +1,145 @@
-# SparsePEA: Sparse Grid Parameterized Expectations Algorithm
+# SparsePEA
 
-A Python package for solving dynamic stochastic general equilibrium (DSGE) models using the Parameterized Expectations Algorithm (PEA) with sparse grid interpolation.
-
-**Author:** Simon Mishricky  
-**Affiliation:** Australian National University
-
-## Overview
-
-SparsePEA implements a computationally efficient method for solving high-dimensional macroeconomic models by combining:
-- **Parameterized Expectations Algorithm (PEA):** A projection method that parameterizes conditional expectations in Euler equations
-- **Sparse Grid Interpolation:** Using Tasmanian's local polynomial grids to dramatically reduce the curse of dimensionality
-- **JIT Compilation:** Leveraging Numba for high-performance numerical computation
-
-This approach is particularly well-suited for models with:
-- Occasionally binding constraints (e.g., irreversible investment, collateral constraints)
-- Multiple state variables
-- Non-linear dynamics
-- Stochastic shocks
-
-## Features
-
-- **Multiple Pre-built Models:**
-  - Real Business Cycle (RBC) model with irreversible investment
-  - Diamond-Mortensen-Pissarides (DMP) search and matching model
-
-- **Efficient Numerical Methods:**
-  - Sparse grid state space representation (drastically reduces grid points)
-  - Adaptive sparse grid integration for expectation operators
-  - Fast JIT-compiled model evaluation using Numba
-
-- **Solution Quality Analysis:**
-  - Euler equation residual computation
-  - 3D visualization of policy functions and errors
-  - Error distribution analysis
-
-## Installation
-
-### Prerequisites
-
-```bash
-# Install Tasmanian (sparse grid library)
-# See: https://tasmanian.ornl.gov/
-
-# For macOS with Homebrew:
-brew install tasmanian
-
-# For Ubuntu/Debian:
-# Build from source or use available packages
-```
-
-### Python Dependencies
-
-```bash
-pip install numpy numba matplotlib quantecon
-pip install scikit-tasmanian  # Python bindings for Tasmanian
-```
-
-## Quick Start
-
-### Example: Real Business Cycle Model
+A Python solver for DSGE models with occasionally binding constraints, using the Parameterised Expectations Algorithm on [Tasmanian](https://tasmanian.ornl.gov/) sparse grids. Solves a calibrated DMP search model in under 60 seconds on a laptop, with Euler equation errors below 0.01%.
 
 ```python
 import numpy as np
 from sparsepea.models import rbc_jit
 from sparsepea.tools import tools
 
-# Initialize the RBC model
-rbc_model = rbc_jit()
+model = rbc_jit()
+solver = tools(model=model, depth=8)
+grid, grid_points = solver.make_states_grid()
 
-# Set up the sparse grid solver
-solver = tools(model=rbc_model, 
-               states_input=2,   # Capital and TFP shock
-               states_output=1,
-               shocks_input=1,
-               shocks_output=1,
-               depth=8,          # Sparse grid depth
-               order=1)          # Polynomial order
+e_init = np.ones((grid_points.shape[0], 1)) * 0.5
+e_solution, policy, multiplier, status = solver.compute_solution(e_init)
+print(status)  # "Converged after 142 iterations"
 
-# Create initial guess for Euler equation
-grid_states, grid_states_points = solver.make_states_grid()
-e_initial = np.ones((grid_states_points.shape[0], 1)) * 0.5
-
-# Solve the model
-e_solution, policy_function, multiplier, status = solver.compute_solution(e_initial)
-print(status)
-
-# Visualize the solution
-solver.plot_policy_3d(policy_function)
-
-# Analyze solution accuracy
-solver.plot_errors_3d(e_initial)
-solver.plot_errors_dist()
+solver.plot_policy_3d(policy)
 ```
 
-### Example: DMP Search Model
+## Why this exists
+
+Two problems make DSGE models hard to solve numerically:
+
+1. **The curse of dimensionality.** Tensor-product grids grow exponentially in the number of state variables. A 2D problem with 100 points per dimension needs 10,000 grid points; a 3D problem needs 1,000,000. Sparse grids (Smolyak, 1963) reduce this to polynomial growth — roughly 100 points in 2D and 500 in 3D — by keeping only the grid points that matter most for interpolation accuracy.
+
+2. **Occasionally binding constraints.** Perturbation methods linearise around a steady state, which fails at the kink where a constraint starts binding. The PEA is a global projection method that checks complementarity conditions pointwise, so it handles the binding and non-binding regions simultaneously without smoothing or penalty functions.
+
+SparsePEA combines both, using [Tasmanian](https://tasmanian.ornl.gov/) for sparse grid construction and quadrature, and [Numba](https://numba.pydata.org/) `@jitclass` for JIT-compiled inner loops.
+
+## Install
+
+SparsePEA depends on the [Tasmanian](https://tasmanian.ornl.gov/) sparse grid library from Oak Ridge National Laboratory:
+
+```bash
+# macOS
+brew install tasmanian
+
+# Linux / conda
+conda install -c conda-forge tasmanian
+```
+
+Then install the package:
+
+```bash
+git clone https://github.com/Simon-Mishricky/sparsepea.git
+cd sparsepea
+pip install -e .
+```
+
+## Models included
+
+**`rbc_jit`** — Real Business Cycle with irreversible investment. A social planner maximises lifetime CRRA utility subject to a Cobb–Douglas production function and the constraint that gross investment cannot be negative. TFP follows a log-AR(1). The irreversibility constraint is enforced via KKT complementarity conditions. Parameters: capital share α, depreciation δ, risk aversion η, TFP persistence ρ.
+
+**`dmp_jit`** — Diamond–Mortensen–Pissarides search and matching with the Hagedorn–Manovskii (2008) calibration. Firms post vacancies, workers search, and a CES matching function governs meetings. Wages are Nash-bargained. The flow value of unemployment is set close to productivity, generating the large labour-market fluctuations that standard calibrations miss (the Shimer puzzle). The zero-vacancy constraint binds in bad states and is enforced via KKT conditions. Parameters: bargaining power η, separation rate s, matching elasticity ι, vacancy cost κ.
+
+## How it works
+
+The PEA parameterises the conditional expectation in the Euler equation:
+
+$$\psi(x_t) \approx \mathbb{E}_t\bigl[h(x_t, x_{t+1})\bigr]$$
+
+and iterates on a fixed-point mapping: given a guess $\psi$, solve for the endogenous variables (capital or employment), interpolate $\psi$ at the implied next-period states, evaluate the right-hand side of the Euler equation by numerical integration, and update $\psi$. At each grid point, the algorithm checks whether the occasionally binding constraint is active and applies the appropriate complementarity condition.
+
+Sparse grids enter in two places: the **state-space grid** on which $\psi$ is defined and interpolated, and the **quadrature rule** used to compute the expectation integral over future shocks. Both use Tasmanian's local polynomial basis, which provides exact interpolation at the grid nodes and smooth approximation elsewhere.
+
+The solver iterates until the sup-norm distance between successive $\psi$ iterates falls below a tolerance (default $10^{-5}$). Convergence is typically achieved in 100–400 iterations depending on the model.
+
+## Solution diagnostics
+
+SparsePEA reports solution quality via **Euler equation residuals** — the percentage error in the Euler equation at a fine regular grid over the state space. If the solution were exact, the residual would be zero everywhere. Residuals below $10^{-3}$ (0.1%) are considered acceptable in the computational economics literature; SparsePEA typically achieves $10^{-4}$ at the median.
 
 ```python
-from sparsepea.models import dmp_jit
-
-# Initialize Diamond-Mortensen-Pissarides model
-dmp_model = dmp_jit()
-
-# Set up solver (same interface as RBC)
-solver = tools(model=dmp_model, 
-               states_input=2,   # Employment and productivity
-               depth=8)
-
-# Solve and analyze...
+solver.plot_euler_residuals_3d(e_init)       # 3D surface of residuals
+solver.plot_euler_residuals_distribution()   # histogram
 ```
 
-## Repository Structure
+## Notebooks
 
-```
-sparsepea/
-├── models.py              # DSGE model specifications (JIT-compiled)
-├── tools.py               # Solver and interpolation tools
-├── notebooks/
-│   ├── Sparsepea_Module.ipynb              # Package usage tutorial
-│   └── Petrovsky-Nadeau_Zhang_Simulations.ipynb  # Replication example
-├── README.md
-├── requirements.txt
-└── LICENSE
-```
-
-## Models Included
-
-### 1. Real Business Cycle with Irreversible Investment (`rbc_jit`)
-
-A standard RBC model with an irreversibility constraint on investment. Features:
-- Occasionally binding constraint (investment ≥ 0)
-- TFP follows AR(1) process
-- Complementarity conditions handled via KKT approach
-
-**Key parameters:** Capital share (α), depreciation (δ), risk aversion (η), TFP persistence (ρ)
-
-### 2. Diamond-Mortensen-Pissarides Model (`dmp_jit`)
-
-Search and matching model of unemployment with Hagedorn-Manovskii calibration:
-- Endogenous job creation (vacancy posting)
-- Nash wage bargaining
-- Job destruction shocks
-- Matching function with congestion effects
-
-**Key parameters:** Bargaining power (η), separation rate (s), matching efficiency (κ)
-
-## Methodology
-
-### Parameterized Expectations Algorithm (PEA)
-
-The PEA solves dynamic models by parameterizing the conditional expectation term in Euler equations. For a generic Euler equation:
-
-```
-E_t[m(x_t, x_{t+1}, θ)] = 0
-```
-
-We approximate `ψ(x_t) = E_t[g(x_{t+1})]` using a flexible functional form and iterate until convergence.
-
-**Advantages:**
-- Naturally handles occasionally binding constraints
-- No need for explicit policy function iteration
-- Efficient for models with persistent shocks
-
-### Sparse Grids
-
-Traditional tensor product grids suffer from the curse of dimensionality (grid points grow exponentially with dimensions). Sparse grids reduce this to near-linear growth by adaptively selecting only the most important grid points.
-
-**Computational savings:**
-- 2D problem: ~100 points vs 10,000+ for tensor grid
-- 3D problem: ~500 points vs 1,000,000+ for tensor grid
-
-## Example Applications
-
-### Replicating Petrosky-Nadeau and Zhang (2017)
-
-The `Petrovsky-Nadeau_Zhang_Simulations.ipynb` notebook demonstrates:
-- Model calibration to match U.S. labor market moments
-- Business cycle statistics computation
-- Impulse response functions to productivity shocks
-- Comparison with published results
+| Notebook | Description |
+|:---------|:------------|
+| [`tutorial.ipynb`](tutorial.ipynb) | Solves both models from scratch with full mathematical exposition |
+| [`petrosky_nadeau_zhang_replication.ipynb`](petrosky_nadeau_zhang_replication.ipynb) | Replicates Panel D of Table 1 from Petrosky-Nadeau & Zhang (2017, *QE*) |
 
 ## Performance
 
-Typical solve times on a modern laptop:
-- RBC model (depth=8): ~10-30 seconds
-- DMP model (depth=8): ~30-60 seconds
+| Model | Grid depth | Solve time | Median Euler error |
+|:------|:---:|:---:|:---:|
+| RBC | 8 | 10–30 s | < 0.01% |
+| DMP | 8 | 30–60 s | < 0.01% |
 
-Euler equation errors:
-- Median error: < 0.01%
-- 99th percentile: < 0.1%
+Benchmarked on an Apple M-series laptop.
+
+## Project layout
+
+```
+sparsepea/
+├── sparsepea/
+│   ├── __init__.py          # Public API
+│   ├── models.py            # JIT-compiled model specifications
+│   └── tools.py             # Solver, interpolation, diagnostics
+├── tests/
+│   └── test_models.py
+├── images/                  # Plots used in this README
+├── tutorial.ipynb           # Package walkthrough
+├── petrosky_nadeau_zhang_replication.ipynb
+├── setup.py
+├── requirements.txt
+└── LICENSE                  # MIT
+```
+
+## Adding a new model
+
+Write a `@jitclass` that implements four methods:
+
+| Method | Purpose |
+|:-------|:--------|
+| `x_axis_grid(e, grid)` | Map expectations → next-period endogenous state, policy, and KKT multiplier |
+| `rhs_euler(grid, x_p, z_p, psi_p, e, w)` | Evaluate the RHS of the Euler equation via quadrature |
+| `c_implied(e_fine, mu_fine, grid)` | Implied policy for Euler residual diagnostics |
+| `ar1_conditional_density(y, z)` | Transition density for the exogenous shock process |
+
+The solver handles grid construction, interpolation, iteration, and plotting. See `models.py` for working examples.
+
+## References
+
+- Judd, K., Maliar, L. and Maliar, S. (2011). Numerically stable and accurate stochastic simulation approaches for solving dynamic economic models. *Quantitative Economics*, 2(2), 173–210.
+- Maliar, L. and Maliar, S. (2015). Merging simulation and projection approaches to solve high-dimensional problems with an application to a new Keynesian model. *Quantitative Economics*, 6(1), 1–47.
+- Petrosky-Nadeau, N. and Zhang, L. (2017). Solving the Diamond–Mortensen–Pissarides model accurately. *Quantitative Economics*, 8(2), 611–650.
+- Hagedorn, M. and Manovskii, I. (2008). The cyclical behavior of equilibrium unemployment and vacancies revisited. *American Economic Review*, 98(4), 1692–1706.
 
 ## Citation
 
-If you use this code in your research, please cite:
-
 ```bibtex
-@misc{mishricky2025sparsepea,
-  author = {Mishricky, Simon},
-  title = {SparsePEA: Sparse Grid Parameterized Expectations Algorithm},
-  year = {2025},
-  url = {https://github.com/simon-mishricky/sparsepea}
+@software{mishricky2025sparsepea,
+  author  = {Mishricky, Simon},
+  title   = {{SparsePEA}: Sparse Grid Parameterised Expectations Algorithm},
+  year    = {2025},
+  url     = {https://github.com/Simon-Mishricky/sparsepea}
 }
 ```
 
-## Related Research
-
-This implementation builds on methodological work from:
-- **Maliar and Maliar (2015):** "Merging simulation and projection approaches to solve high-dimensional problems with an application to a new Keynesian model"
-- **Petrosky-Nadeau and Zhang (2017):** "Solving the Diamond-Mortensen-Pissarides model accurately"
-- **Judd, Maliar and Maliar (2011):** "Numerically stable and accurate stochastic simulation approaches for solving dynamic economic models"
-
 ## License
 
-MIT License - see LICENSE file for details
-
-## Contact
-
-**Simon Mishricky**  
-Email: simon.mishricky@gmail.com  
-Website: [github.com/Simon-Mishricky](https://github.com/Simon-Mishricky)
+MIT — see [LICENSE](LICENSE) for details.
