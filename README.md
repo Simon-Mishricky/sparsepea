@@ -13,7 +13,7 @@ grid, grid_points = solver.make_states_grid()
 
 e_init = np.ones((grid_points.shape[0], 1)) * 0.5
 e_solution, policy, multiplier, status = solver.compute_solution(e_init)
-print(status)  # "Converged after 142 iterations"
+print(status)  # "Convergence successful: 142 Iterations"
 
 solver.plot_policy_3d(policy)
 ```
@@ -52,7 +52,9 @@ pip install -e .
 
 **`rbc_jit`** — Real Business Cycle with irreversible investment. A social planner maximises lifetime CRRA utility subject to a Cobb–Douglas production function and the constraint that gross investment cannot be negative. TFP follows a log-AR(1). The irreversibility constraint is enforced via KKT complementarity conditions. Parameters: capital share α, depreciation δ, risk aversion η, TFP persistence ρ.
 
-**`dmp_jit`** — Diamond–Mortensen–Pissarides search and matching with the Hagedorn–Manovskii (2008) calibration. Firms post vacancies, workers search, and a CES matching function governs meetings. Wages are Nash-bargained. The flow value of unemployment is set close to productivity, generating the large labour-market fluctuations that standard calibrations miss (the Shimer puzzle). The zero-vacancy constraint binds in bad states and is enforced via KKT conditions. Parameters: bargaining power η, separation rate s, matching elasticity ι, vacancy cost κ.
+**`dmp_jit`** — Diamond–Mortensen–Pissarides search and matching with the Hagedorn–Manovskii (2008) calibration. Firms post vacancies, workers search, and a CES matching function governs meetings. Wages are Nash-bargained. The flow value of unemployment is set close to productivity, generating the large labour-market fluctuations that standard calibrations miss (the Shimer puzzle). Vacancy costs are state-dependent: κ = κ_K·X + κ_W·X^ξ. The zero-vacancy constraint binds in bad states and is enforced via KKT conditions. Parameters: bargaining power η, separation rate s, matching elasticity ι, vacancy cost components κ_K, κ_W, and vacancy cost exponent ξ.
+
+**`end_dmp_jit`** — Endogenous disaster variant of the DMP model with an alternative vacancy cost specification κ = κ₀ + κ₁·q, where q is the vacancy-filling probability. Parameters: bargaining power η, separation rate s, matching elasticity ι, fixed vacancy cost κ₀, variable vacancy cost κ₁.
 
 ## How it works
 
@@ -71,8 +73,8 @@ The solver iterates until the sup-norm distance between successive $\psi$ iterat
 SparsePEA reports solution quality via **Euler equation residuals** — the percentage error in the Euler equation at a fine regular grid over the state space. If the solution were exact, the residual would be zero everywhere. Residuals below $10^{-3}$ (0.1%) are considered acceptable in the computational economics literature; SparsePEA typically achieves $10^{-4}$ at the median.
 
 ```python
-solver.plot_euler_residuals_3d(e_init)       # 3D surface of residuals
-solver.plot_euler_residuals_distribution()   # histogram
+solver.plot_errors_3d(e_init)       # 3D surface of residuals + histogram
+solver.plot_errors_dist()           # standalone histogram (backward compat)
 ```
 
 ## Notebooks
@@ -97,11 +99,10 @@ Benchmarked on an Apple M-series laptop.
 sparsepea/
 ├── sparsepea/
 │   ├── __init__.py          # Public API
-│   ├── models.py            # JIT-compiled model specifications
+│   ├── models.py            # JIT-compiled model specifications (rbc_jit, dmp_jit, end_dmp_jit)
 │   └── tools.py             # Solver, interpolation, diagnostics
 ├── tests/
 │   └── test_models.py
-├── images/                  # Plots used in this README
 ├── tutorial.ipynb           # Package walkthrough
 ├── petrosky_nadeau_zhang_replication.ipynb
 ├── setup.py
@@ -115,9 +116,9 @@ Write a `@jitclass` that implements four methods:
 
 | Method | Purpose |
 |:-------|:--------|
-| `x_axis_grid(e, grid)` | Map expectations → next-period endogenous state, policy, and KKT multiplier |
-| `rhs_euler(grid, x_p, z_p, psi_p, e, w)` | Evaluate the RHS of the Euler equation via quadrature |
-| `c_implied(e_fine, mu_fine, grid)` | Implied policy for Euler residual diagnostics |
+| `x_axis_grid(e, grid_all)` | Map expectations → next-period endogenous state, policy, and KKT multiplier |
+| `rhs_euler(grid_all, x_p_grid, z_p_grid, ψ_p_grid, e, w)` | Evaluate the RHS of the Euler equation via quadrature |
+| `c_implied(e_fine, μ_fine, grid)` | Implied policy for Euler residual diagnostics |
 | `ar1_conditional_density(y, z)` | Transition density for the exogenous shock process |
 
 The solver handles grid construction, interpolation, iteration, and plotting. See `models.py` for working examples.
