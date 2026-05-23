@@ -35,10 +35,59 @@ model classes. This is a known trade-off for JIT compilation performance.
 """
 
 import numpy as np
-from numba import float64
+from numba import float64, njit
 from numba.experimental import jitclass
-from math import *
+from math import erf, sqrt, pi, log, exp
 import quantecon.markov as qe
+
+
+# =============================================================================
+# Shared distribution helpers
+# =============================================================================
+#
+# These are extracted as module-level @njit functions so each jitclass can
+# call them as thin wrappers, avoiding duplicated bodies across rbc_jit /
+# dmp_jit / end_dmp_jit. jitclass does not support inheritance, so this is
+# the standard pattern for sharing code between Numba-compiled classes.
+
+
+@njit
+def _norm_cdf(x, μ, σ):
+    """Normal CDF at ``x`` with mean ``μ`` and std ``σ``."""
+    return 0.5 * (1.0 + erf((x - μ) / (σ * sqrt(2.0))))
+
+
+@njit
+def _log_normal_cdf(x, μ, σ):
+    """Log-normal CDF: P(X ≤ x) where ln(X) ~ N(μ, σ²)."""
+    if x <= 0.0:
+        return 0.0
+    return _norm_cdf(log(x), μ, σ)
+
+
+@njit
+def _log_normal_pdf(x, μ, σ):
+    """Log-normal PDF where ln(X) ~ N(μ, σ²)."""
+    if x <= 0.0:
+        return 0.0
+    den = x * σ * sqrt(2.0 * pi)
+    return exp(-0.5 * ((log(x) - μ) / σ)**2) / den
+
+
+@njit
+def _log_truncnorm_pdf(x, μ, σ, a, b):
+    """Log-normal PDF truncated to the interval [a, b]."""
+    if x <= a or b <= x:
+        return 0.0
+    cdf_a = _log_normal_cdf(a, μ, σ)
+    cdf_b = _log_normal_cdf(b, μ, σ)
+    return _log_normal_pdf(x, μ, σ) / (cdf_b - cdf_a)
+
+
+@njit
+def _ar1_conditional_density(y, z, ρ, σ, a, b):
+    """Truncated log-normal density of y given z under ln(y') = ρ·ln(z) + σ·ε."""
+    return _log_truncnorm_pdf(y, ρ * log(z), σ, a, b)
 
 
 # =============================================================================
@@ -106,78 +155,15 @@ class rbc_jit:
         self.k_max = self.k_ss * 1.6
         
         self.state_bounds = np.array([self.k_min, self.k_max, self.z_min, self.z_max])
-        self.shock_bounds = np.array([self.z_min, self.z_max]) 
-        
-    def norm_cdf(self, x, μ):
-        '''This function solves for the cumulative density function 
-           of the normal distribution given μ and σ'''
-        
-        σ = self.σ 
-    
-        cdf = 0.5 * (1 + erf((x - μ) / (σ * np.sqrt(2))))
-    
-        return cdf
-    
-    def log_normal_cdf(self, x, μ):
-        '''This function solves for the cumulative density function
-           of the log-normal distribution given μ and σ'''
-        
-        σ = self.σ 
-        
-        if x <= 0.0:
-            cdf = 0.0
-        else:
-            logx = np.log(x)
-            cdf = self.norm_cdf(logx, μ)
-    
-        return cdf
-    
-    def log_normal_pdf(self, x, μ):
-        '''This function solves for the probability density function
-           of the log-normal distribution given μ and σ'''
-        
-        σ = self.σ
-    
-        if x <= 0.0:
-            pdf = 0.0
-        else:
-            den = x * σ * np.sqrt(2.0 * np.pi)
-            pdf = np.exp(-0.5 * ((np.log(x) - μ) / σ)**2) / den
-        
-        return pdf
-    
-    def log_truncnorm_pdf(self, x, μ):
-        '''This function solves for the probability density function
-           of a truncated normal distribution given μ, σ and truncations
-           bounds [a, b]'''
-        
-        σ, a, b = self.σ, self.z_min, self.z_max
-
-        # Check whether x fits within the truncation bounds
-        if x <= a:
-            pdf = 0.0
-        elif b <= x:
-            pdf = 0.0
-        else:
-            cdf_a = self.log_normal_cdf(a, μ)
-            cdf_b = self.log_normal_cdf(b, μ)
-            pdf_x = self.log_normal_pdf(x, μ)
-        
-            pdf = pdf_x / (cdf_b - cdf_a)
-        
-        return pdf
+        self.shock_bounds = np.array([self.z_min, self.z_max])
 
     def ar1_conditional_density(self, y, z):
-        '''This function solves for the conditional density generated 
-           by an AR1 process given this period state y and the 
-           previous period state z'''
-        
-        ρ = self.ρ
-        
-        μ = ρ * np.log(z)
-    
-        return self.log_truncnorm_pdf(y, μ)
-        
+        '''Conditional density of TFP next period given TFP this period,
+           truncated to the unconditional [z_min, z_max] bounds.'''
+
+        return _ar1_conditional_density(y, z, self.ρ, self.σ,
+                                        self.z_min, self.z_max)
+
     def x_axis_grid(self, e, grid_all):
         '''This function solves for K_+ grid, given a guess of the 
            RHS of the Euler equation, e(K, Z) and a grid of the state space
@@ -358,76 +344,14 @@ class dmp_jit:
         
         self.state_bounds = np.array([self.n_min, self.n_max, self.x_min, self.x_max])
         self.shock_bounds = np.array([self.x_min, self.x_max])
-        
-    def norm_cdf(self, x, μ):
-        '''This function solves for the cumulative density function 
-           of the normal distribution given μ and σ'''        
-        
-        σ = self.σ 
-    
-        cdf = 0.5 * (1 + erf((x - μ) / (σ * np.sqrt(2))))
-    
-        return cdf
-    
-    def log_normal_cdf(self, x, μ):
-        '''This function solves for the cumulative density function
-           of the log-normal distribution given μ and σ'''
-    
-        σ = self.σ 
-        
-        if x <= 0.0:
-            cdf = 0.0
-        else:
-            logx = np.log(x)
-            cdf = self.norm_cdf(logx, μ)
-    
-        return cdf
-    
-    def log_normal_pdf(self, x, μ):
-        '''This function solves for the probability density function
-           of the log-normal distribution given μ and σ'''
-        
-        σ = self.σ
-    
-        if x <= 0.0:
-            pdf = 0.0
-        else:
-            den = x * σ * np.sqrt(2.0 * np.pi)
-            pdf = np.exp(-0.5 * ((np.log(x) - μ) / σ)**2) / den
-        
-        return pdf
-    
-    def log_truncnorm_pdf(self, x, μ):
-        '''This function solves for the probability density function
-           of a truncated normal distribution given μ, σ and truncations
-           bounds [a, b]'''
-        
-        σ, a, b = self.σ, self.x_min, self.x_max
-
-        if x <= a:
-            pdf = 0.0
-        elif b <= x:
-            pdf = 0.0
-        else:
-            cdf_a = self.log_normal_cdf(a, μ)
-            cdf_b = self.log_normal_cdf(b, μ)
-            pdf_x = self.log_normal_pdf(x, μ)
-        
-            pdf = pdf_x / (cdf_b - cdf_a)
-        
-        return pdf
 
     def ar1_conditional_density(self, y, z):
-        '''This function solves for the conditional density generated 
-           by an AR1 process given this period state y and the 
-           previous period state z'''
-        
-        ρ = self.ρ
-        
-        μ = ρ * np.log(z)
-    
-        return self.log_truncnorm_pdf(y, μ)
-    
+        '''Conditional density of productivity next period given productivity
+           this period, truncated to [x_min, x_max].'''
+
+        return _ar1_conditional_density(y, z, self.ρ, self.σ,
+                                        self.x_min, self.x_max)
+
     def x_axis_grid(self, e, grid_all):
         '''This function solves for N_+ grid, given a guess of the 
            RHS of the Euler equation, e(N, X) and a grid of the state space
@@ -612,76 +536,14 @@ class end_dmp_jit:
         
         self.state_bounds = np.array([self.n_min, self.n_max, self.x_min, self.x_max])
         self.shock_bounds = np.array([self.x_min, self.x_max])
-        
-    def norm_cdf(self, x, μ):
-        '''This function solves for the cumulative density function 
-           of the normal distribution given μ and σ'''        
-        
-        σ = self.σ 
-    
-        cdf = 0.5 * (1 + erf((x - μ) / (σ * np.sqrt(2))))
-    
-        return cdf
-    
-    def log_normal_cdf(self, x, μ):
-        '''This function solves for the cumulative density function
-           of the log-normal distribution given μ and σ'''
-    
-        σ = self.σ 
-        
-        if x <= 0.0:
-            cdf = 0.0
-        else:
-            logx = np.log(x)
-            cdf = self.norm_cdf(logx, μ)
-    
-        return cdf
-    
-    def log_normal_pdf(self, x, μ):
-        '''This function solves for the probability density function
-           of the log-normal distribution given μ and σ'''
-        
-        σ = self.σ
-    
-        if x <= 0.0:
-            pdf = 0.0
-        else:
-            den = x * σ * np.sqrt(2.0 * np.pi)
-            pdf = np.exp(-0.5 * ((np.log(x) - μ) / σ)**2) / den
-        
-        return pdf
-    
-    def log_truncnorm_pdf(self, x, μ):
-        '''This function solves for the probability density function
-           of a truncated normal distribution given μ, σ and truncations
-           bounds [a, b]'''
-        
-        σ, a, b = self.σ, self.x_min, self.x_max
-
-        if x <= a:
-            pdf = 0.0
-        elif b <= x:
-            pdf = 0.0
-        else:
-            cdf_a = self.log_normal_cdf(a, μ)
-            cdf_b = self.log_normal_cdf(b, μ)
-            pdf_x = self.log_normal_pdf(x, μ)
-        
-            pdf = pdf_x / (cdf_b - cdf_a)
-        
-        return pdf
 
     def ar1_conditional_density(self, y, z):
-        '''This function solves for the conditional density generated 
-           by an AR1 process given this period state y and the 
-           previous period state z'''
-        
-        ρ = self.ρ
-        
-        μ = ρ * np.log(z)
-    
-        return self.log_truncnorm_pdf(y, μ)
-    
+        '''Conditional density of productivity next period given productivity
+           this period, truncated to [x_min, x_max].'''
+
+        return _ar1_conditional_density(y, z, self.ρ, self.σ,
+                                        self.x_min, self.x_max)
+
     def x_axis_grid(self, e, grid_all):
         '''This function solves for N_+ grid, given a guess of the 
            RHS of the Euler equation, e(N, X) and a grid of the state space
