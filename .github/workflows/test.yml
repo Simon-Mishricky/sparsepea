@@ -25,7 +25,9 @@ jobs:
       - name: Pre-install Tasmanian build prerequisites
         run: |
           python -m pip install --upgrade pip wheel setuptools
-          python -m pip install scikit-build "cmake>=3.19" packaging numpy
+          # Tasmanian's setup.py uses packaging.version.LegacyVersion, which
+          # was removed in packaging 22.0 — pin to the last compatible version.
+          python -m pip install "scikit-build<0.18" "cmake>=3.19" "packaging<22" numpy
 
       - name: Install Tasmanian from PyPI
         run: python -m pip install --no-cache-dir Tasmanian
