@@ -807,25 +807,25 @@ class end_dmp_jit:
                 
                 Qz = self.ar1_conditional_density(x_p, x)
                 
+                # Stochastic discount factor under log utility: M_{t+1} = β·C_t/C_{t+1}
+                # (Petrosky-Nadeau, Zhang & Kuehn 2018, AER, eq. 8).
+                M = β * (c / c_p)
+
                 # Solve and store the integrand of the RHS of the Euler equation
-                integrand[j] = β  * (x_p - w_p + ((1 - s) * ((κ_0 / q_p) + κ_1 - λ_p))) * Qz
-                
+                integrand[j] = M * (x_p - w_p + ((1 - s) * ((κ_0 / q_p) + κ_1 - λ_p))) * Qz
+
             # Integrate the integrand and store RHS of the Euler equation
             e_p[i, :] = np.sum(integrand * w.T)
-            
+
         return e_p
-    
+
     def c_implied(self, e_fine, μ_fine, grid):
         '''This function computes an implied solution of the LHS of the Euler
            equation, used for calculating Euler residuals'''
-        
-        x = grid
-        
-        κ_k, κ_w, ξ = self.κ_k, self.κ_w, self.ξ
-        ι = self.ι 
-        
-        κ = κ_k * x + κ_w * x**ξ
-        
-        c_implied = (((e_fine + μ_fine) / κ)**(ι) - 1)**(1 / ι)
-        
+
+        κ_0, κ_1 = self.κ_0, self.κ_1
+        ι = self.ι
+
+        c_implied = (((e_fine + μ_fine - κ_1) / κ_0)**(ι) - 1)**(1 / ι)
+
         return c_implied

@@ -50,6 +50,12 @@ class tools:
         Maximum PEA iterations (default 500).
     tol : float
         Convergence tolerance on the sup-norm (default 1e-5).
+    damping : float
+        Fixed-point damping factor in (0, 1]. The update is
+        ``e := damping·e_new + (1 - damping)·e_old``. Use ``damping=1.0``
+        (default) for straight fixed-point iteration. Models with a
+        consumption-based stochastic discount factor (e.g. ``end_dmp_jit``)
+        typically require ``damping ≈ 0.1`` to avoid blow-up.
     """
     
     def __init__(self,
@@ -61,7 +67,8 @@ class tools:
                  depth=8,                 # Number of sparse grid points
                  order=1,                 # Order of the polynomial for grid
                  max_iter=500,            # Maximum number of iterations to solve e
-                 tol=1e-5):               # Tolerance criterion
+                 tol=1e-5,                # Tolerance criterion
+                 damping=1.0):            # Fixed-point damping (1.0 = undamped)
         
         self.states_input = states_input
         self.states_output = states_output
@@ -71,6 +78,7 @@ class tools:
         self.order = order
         self.max_iter = max_iter
         self.tol = tol
+        self.damping = damping
         self.model = model
         self.state_bounds = np.reshape(model.state_bounds, (2, 2))
         self.shock_bounds = np.atleast_2d(model.shock_bounds)
@@ -137,33 +145,35 @@ class tools:
     
     def compute_solution(self, e):
         '''This function solves for the optimal e using pea algorithm'''
-        
+
         model = self.model
-        max_iter, tol = self.max_iter, self.tol
+        max_iter, tol, damping = self.max_iter, self.tol, self.damping
         y_grid, y_p_grid, w = self.make_shocks_grid()
         grid_states, grid_states_points = self.make_states_grid()
-        
+
+        st = f"Did not converge in {max_iter} iterations"
         for i in range(max_iter):
-            
+
             # Solve for the next period x_axis grid
             x_p_grid, function, μ = model.x_axis_grid(e, grid_states_points)
-            
+
             # Given next period grids interpolate to find e
             ψ_p_grid = self.euler_interpolation(x_p_grid, e)
-            
+
             # Solve for new e
             e_p = model.rhs_euler(grid_states_points, x_p_grid, y_p_grid, ψ_p_grid, e, w)
-            # # Use the supremum norm to evaluate the distance between the inital e and the newly generated e
+
+            # Sup-norm distance between successive iterates
             dist = (np.abs(e_p - e)).max()
-            
-            # Update initital guess with newly generated e
-            e = e_p
-        
+
+            # Damped update: e := damping·e_p + (1 - damping)·e
+            e = damping * e_p + (1.0 - damping) * e
+
             if dist < tol:
-                st = "Convergence successful: " + str(i) + " Iterations"
+                st = f"Convergence successful: {i} Iterations"
                 break
-  
-        return e_p, function, μ, st
+
+        return e, function, μ, st
     
     def policy_function(self, c_grid, grid=None):
         '''This function generates a policy function defined on a regular
