@@ -33,14 +33,15 @@ SparsePEA combines both, using [Tasmanian](https://tasmanian.ornl.gov/) for spar
 
 ## Install
 
-SparsePEA depends on the [Tasmanian](https://tasmanian.ornl.gov/) sparse grid library from Oak Ridge National Laboratory:
+SparsePEA depends on the [Tasmanian](https://tasmanian.ornl.gov/) sparse-grid library from Oak Ridge National Laboratory. Install it separately first:
 
 ```bash
-# macOS
+# macOS — Homebrew ships the Python bindings
 brew install tasmanian
 
-# Linux / conda
-conda install -c conda-forge tasmanian
+# Linux — build from source via pip (needs cmake + a C++ compiler)
+sudo apt-get install -y cmake build-essential
+pip install Tasmanian
 ```
 
 Then install the package:

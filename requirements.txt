@@ -2,6 +2,8 @@ numpy>=1.20
 numba>=0.54
 matplotlib>=3.3
 quantecon>=0.5
-scikit-tasmanian>=7.7
+# Tasmanian (Oak Ridge sparse-grid library) is installed out of band:
+#   macOS:  brew install tasmanian
+#   Linux:  pip install Tasmanian   # builds from source, needs cmake
 pandas>=1.3
 statsmodels>=0.13

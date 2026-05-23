@@ -9,32 +9,35 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash -el {0}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up environment with Tasmanian
-        uses: mamba-org/setup-micromamba@v1
+      - uses: actions/setup-python@v5
         with:
-          environment-name: sparsepea-ci
-          create-args: >-
-            python=3.11
-            tasmanian
-            numpy
-            numba
-            pytest
-          init-shell: bash
-          cache-environment: true
+          python-version: "3.11"
+          cache: pip
 
-      - name: Install package
+      - name: Install C/C++ build dependencies for Tasmanian
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake build-essential
+
+      - name: Install Tasmanian (PyPI, builds from source)
+        run: |
+          pip install --upgrade pip wheel setuptools
+          pip install numpy
+          pip install Tasmanian
+
+      - name: Install sparsepea
         run: pip install -e . --no-deps
 
-      - name: Show environment
+      - name: Install test dependencies
+        run: pip install pytest numba
+
+      - name: Smoke import
         run: |
-          python -c "import Tasmanian; print('Tasmanian:', Tasmanian.__version__ if hasattr(Tasmanian, '__version__') else 'imported OK')"
-          python -c "import sparsepea; print('sparsepea OK')"
+          python -c "import Tasmanian; print('Tasmanian imported OK')"
+          python -c "import sparsepea; print('sparsepea imported OK')"
 
       - name: Run tests
         run: pytest tests/ -v

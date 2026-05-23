@@ -17,7 +17,12 @@ setup(
         "numba>=0.54",
         "matplotlib>=3.3",
         "quantecon>=0.5",
-        "scikit-tasmanian>=7.7",
+        # Tasmanian is the Oak Ridge sparse-grid library. Install it
+        # separately — either `brew install tasmanian` (macOS, ships
+        # Python bindings) or `pip install Tasmanian` (Linux, builds
+        # from source via cmake). It is intentionally NOT listed here
+        # because pip cannot resolve a source-only build cleanly inside
+        # this metadata.
         "pandas>=1.3",
         "statsmodels>=0.13",
     ],
