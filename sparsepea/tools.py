@@ -84,84 +84,87 @@ class tools:
         self.shock_bounds = np.atleast_2d(model.shock_bounds)
         self.xy_grid = np.linspace((self.state_bounds[0, 0], self.state_bounds[1, 0]), (self.state_bounds[0, 1], self.state_bounds[1, 1]), 200)
         self.xy_fine = np.linspace((self.state_bounds[0, 0], self.state_bounds[1, 0]), (self.state_bounds[0, 1], self.state_bounds[1, 1]), 1000)
-        
+
+        # Cache grid data that does not change across iterations.
+        # The Tasmanian grid object itself is constructed per interpolation
+        # call (~0.2ms each) because loadNeededPoints can only be called once
+        # per grid lifetime.
+        self.state_points = self._build_states_grid().getPoints()
+        shocks_grid = self._build_shocks_grid()
+        self.shock_points = shocks_grid.getPoints()
+        self.quad_weights = np.atleast_2d(shocks_grid.getQuadratureWeights())
+
+    def _build_states_grid(self):
+        '''Construct a fresh 2D local-polynomial sparse grid on the state space.'''
+
+        grid = ts.makeLocalPolynomialGrid(self.states_input, self.states_output,
+                                          self.depth, self.order, "localp")
+        grid.setDomainTransform(self.state_bounds)
+        return grid
+
+    def _build_shocks_grid(self):
+        '''Construct a fresh 1D local-polynomial sparse grid on the shock space.'''
+
+        grid = ts.makeLocalPolynomialGrid(self.shocks_input, self.shocks_output,
+                                          self.depth, self.order, "localp")
+        grid.setDomainTransform(self.shock_bounds)
+        return grid
+
     def make_states_grid(self):
-        '''This function creates a 2D sparse grid using Tasmanian, 
-           used for the state space of the pea algorithm'''
-        
-        states_input, states_output = self.states_input, self.states_output
-        depth, order = self.depth, self.order
-        
-        # Generate 2D local polynomial grid
-        grid_states = ts.makeLocalPolynomialGrid(states_input, states_output, depth, order, "localp")
-        grid_states.setDomainTransform(self.state_bounds)
-        grid_states_points = grid_states.getPoints()
-        
-        return grid_states, grid_states_points
-    
+        '''Return a fresh state-space sparse grid and its node coordinates.
+
+        Kept for backward compatibility — prefer ``self.state_points`` for
+        the coordinates and ``self._build_states_grid()`` for a fresh grid.'''
+
+        grid = self._build_states_grid()
+        return grid, grid.getPoints()
+
     def make_shocks_grid(self):
-        '''This function creates a 1D sparse grid using Tasmanian,
-           used for the shock grid in the pea algorithm'''
-        
-        shocks_input, shocks_output = self.shocks_input, self.shocks_output
-        depth, order = self.depth, self.order
-        
-        # Generate 1D local polynomial grid
-        grid_shocks = ts.makeLocalPolynomialGrid(shocks_input, shocks_output, depth, order, "localp")
-        grid_shocks.setDomainTransform(self.shock_bounds)
-        grid_shocks_points = grid_shocks.getPoints()
-        
-        # Generate quadrature weights
-        grid_shocks_weights = grid_shocks.getQuadratureWeights()
-        w = np.atleast_2d(grid_shocks_weights)
-        
-        return grid_shocks, grid_shocks_points, w
-    
+        '''Return a fresh shock-space sparse grid, its node coordinates, and
+        quadrature weights. Kept for backward compatibility.'''
+
+        grid = self._build_shocks_grid()
+        return grid, grid.getPoints(), np.atleast_2d(grid.getQuadratureWeights())
+
     def sparse_interpolate(self, state_p, e):
-        '''This function interpolates over the 2D sparse grid, 
-           given a single next period point in order to compute e'''
-        
-        grid_states, grid_states_points = self.make_states_grid()
-        
-        grid_states.loadNeededPoints(e)
-        
-        # Interpolate given the state variables
-        interp = grid_states.evaluateBatch(state_p)
-    
-        return interp
-    
+        '''Interpolate the values ``e`` (one per state-grid node) at the
+           query points ``state_p``.'''
+
+        grid = self._build_states_grid()
+        grid.loadNeededPoints(e)
+        return grid.evaluateBatch(state_p)
+
     def euler_interpolation(self, x_p_grid, e):
-        '''This function interpolates for all next period values
-           and solves all values of e'''
-        
-        y_grid, y_p_grid, w = self.make_shocks_grid()
-        
-        x_state_vals = np.repeat(x_p_grid[:, 0], y_p_grid[:, 0].size)
-        y_state_vals = np.tile(y_p_grid[:, 0], x_p_grid[:, 0].size)
+        '''Interpolate the expectation function ``e`` at every combination of
+           next-period endogenous state and next-period shock.'''
+
+        shock_points = self.shock_points
+        x_state_vals = np.repeat(x_p_grid[:, 0], shock_points[:, 0].size)
+        y_state_vals = np.tile(shock_points[:, 0], x_p_grid[:, 0].size)
         states = np.column_stack((x_state_vals, y_state_vals))
         z_interp = self.sparse_interpolate(states, e)
-        
-        return z_interp.reshape(x_p_grid.size, y_p_grid.size, 1)
-    
+        return z_interp.reshape(x_p_grid.size, shock_points.size, 1)
+
     def compute_solution(self, e):
-        '''This function solves for the optimal e using pea algorithm'''
+        '''Solve for the fixed point of the PEA mapping via damped iteration.'''
 
         model = self.model
         max_iter, tol, damping = self.max_iter, self.tol, self.damping
-        y_grid, y_p_grid, w = self.make_shocks_grid()
-        grid_states, grid_states_points = self.make_states_grid()
+        state_points = self.state_points
+        shock_points = self.shock_points
+        w = self.quad_weights
 
         st = f"Did not converge in {max_iter} iterations"
         for i in range(max_iter):
 
             # Solve for the next period x_axis grid
-            x_p_grid, function, μ = model.x_axis_grid(e, grid_states_points)
+            x_p_grid, function, μ = model.x_axis_grid(e, state_points)
 
             # Given next period grids interpolate to find e
             ψ_p_grid = self.euler_interpolation(x_p_grid, e)
 
             # Solve for new e
-            e_p = model.rhs_euler(grid_states_points, x_p_grid, y_p_grid, ψ_p_grid, e, w)
+            e_p = model.rhs_euler(state_points, x_p_grid, shock_points, ψ_p_grid, e, w)
 
             # Sup-norm distance between successive iterates
             dist = (np.abs(e_p - e)).max()
@@ -176,34 +179,29 @@ class tools:
         return e, function, μ, st
     
     def policy_function(self, c_grid, grid=None):
-        '''This function generates a policy function defined on a regular
-           grid given a sparse grid'''
-        
-        if grid is None:
-            xy_grid = self.xy_grid
-        else:
-            xy_grid = grid
-        
-        grid_states, grid_states_points = self.make_states_grid()
-        
+        '''Interpolate a policy ``c_grid`` (one value per sparse-grid node)
+           onto a regular rectangular grid for plotting.'''
+
+        xy_grid = self.xy_grid if grid is None else grid
+
         x_state_vals = np.repeat(xy_grid[:, 0], xy_grid[:, 1].size)
         y_state_vals = np.tile(xy_grid[:, 1], xy_grid[:, 0].size)
         states = np.column_stack((x_state_vals, y_state_vals))
-    
+
         z_interp = self.sparse_interpolate(states, c_grid)
-    
+
         return z_interp.reshape(xy_grid[:, 0].size, xy_grid[:, 1].size)
-    
+
     def plot_policy_3d(self, c_grid):
         '''This function plots a 3D diagram of a chosen solved function'''
-        
+
         c_interp = self.policy_function(c_grid)
-        
+
         xy_grid = self.xy_grid
-        grid_states, grid_states_points = self.make_states_grid()
-        
-        x_grid = np.atleast_2d(grid_states.getPoints()[:, 0])
-        y_grid = np.atleast_2d(grid_states.getPoints()[:, 1])
+        state_points = self.state_points
+
+        x_grid = np.atleast_2d(state_points[:, 0])
+        y_grid = np.atleast_2d(state_points[:, 1])
         
         fig = plt.figure(figsize=(10, 7), dpi=100)
         ax = fig.add_subplot(111, projection='3d')
