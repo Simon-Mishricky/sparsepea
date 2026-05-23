@@ -1,6 +1,5 @@
 # SparsePEA
 
-[![test](https://github.com/Simon-Mishricky/sparsepea/actions/workflows/test.yml/badge.svg)](https://github.com/Simon-Mishricky/sparsepea/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A Python solver for DSGE models with occasionally binding constraints, using the Parameterised Expectations Algorithm on [Tasmanian](https://tasmanian.ornl.gov/) sparse grids. Solves a calibrated DMP search model in under 60 seconds on a laptop, with Euler equation errors below 0.01%.
