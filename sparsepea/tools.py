@@ -259,12 +259,23 @@ class tools:
         self.error = np.abs((c_fine - c_implied) / c_implied)
         return self.error
 
-    def plot_errors_3d(self, e):
-        '''This function plots the Euler residuals as a 3D surface alongside
-           their distribution in a side-by-side figure'''
+    def plot_errors_3d(self, e=None):
+        '''Plot the Euler residuals as a 3D surface alongside their
+           distribution in a side-by-side figure.
 
+        Parameters
+        ----------
+        e : ndarray or None
+            If provided, runs ``compute_residuals(e)`` first (which solves
+            the model and computes the residual surface). If ``None`` (the
+            preferred path), plots the cached ``self.error`` left by a
+            prior ``compute_residuals`` call — no re-solve.
+        '''
+
+        if e is not None:
+            self.compute_residuals(e)
         xy_fine = self.xy_fine
-        error = self.compute_residuals(e)
+        error = self.error
 
         # Create side-by-side figure: 3D surface + histogram
         fig = plt.figure(figsize=(14, 5.5), dpi=100)
