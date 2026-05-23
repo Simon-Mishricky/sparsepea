@@ -34,6 +34,18 @@ jobs:
       - name: Install test dependencies
         run: pip install pytest numba
 
+      - name: Diagnose Tasmanian install location
+        if: always()
+        run: |
+          echo "=== pip show Tasmanian ==="
+          pip show Tasmanian || true
+          echo "=== pip show files ==="
+          pip show -f Tasmanian || true
+          echo "=== where python looks ==="
+          python -c "import sys; print('\n'.join(sys.path))"
+          echo "=== try import ==="
+          python -c "import Tasmanian; print('OK:', Tasmanian.__file__)" || echo "import failed"
+
       - name: Smoke import
         run: |
           python -c "import Tasmanian; print('Tasmanian imported OK')"
