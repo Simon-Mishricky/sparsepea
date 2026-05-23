@@ -39,9 +39,8 @@ SparsePEA depends on the [Tasmanian](https://tasmanian.ornl.gov/) sparse-grid li
 # macOS — Homebrew ships the Python bindings
 brew install tasmanian
 
-# Linux — build from source via pip (needs cmake + a C++ compiler)
-sudo apt-get install -y cmake build-essential
-pip install Tasmanian
+# Ubuntu/Debian — ships in apt
+sudo apt-get install -y python3-tasmanian
 ```
 
 Then install the package:

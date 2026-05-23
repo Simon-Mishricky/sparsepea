@@ -12,44 +12,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install C/C++ build dependencies for Tasmanian
+      - name: Install Tasmanian from apt
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake build-essential
+          sudo apt-get install -y --no-install-recommends python3-tasmanian python3-numpy python3-pip
 
-      - name: Install Tasmanian (PyPI, builds from source)
+      - name: Install sparsepea + test deps
         run: |
-          pip install --upgrade pip wheel setuptools
-          pip install numpy
-          pip install Tasmanian
-
-      - name: Install sparsepea
-        run: pip install -e . --no-deps
-
-      - name: Install test dependencies
-        run: pip install pytest numba
-
-      - name: Diagnose Tasmanian install location
-        if: always()
-        run: |
-          echo "=== pip show Tasmanian ==="
-          pip show Tasmanian || true
-          echo "=== pip show files ==="
-          pip show -f Tasmanian || true
-          echo "=== where python looks ==="
-          python -c "import sys; print('\n'.join(sys.path))"
-          echo "=== try import ==="
-          python -c "import Tasmanian; print('OK:', Tasmanian.__file__)" || echo "import failed"
+          # Use system Python so it can find python3-tasmanian (installed
+          # by apt into /usr/lib/python3/dist-packages, not the venv).
+          python3 -m pip install --user --break-system-packages numba pytest matplotlib
+          python3 -m pip install --user --break-system-packages -e . --no-deps
 
       - name: Smoke import
         run: |
-          python -c "import Tasmanian; print('Tasmanian imported OK')"
-          python -c "import sparsepea; print('sparsepea imported OK')"
+          python3 -c "import Tasmanian; print('Tasmanian:', Tasmanian.__file__)"
+          python3 -c "import sparsepea; print('sparsepea OK')"
 
       - name: Run tests
-        run: pytest tests/ -v
+        run: python3 -m pytest tests/ -v
