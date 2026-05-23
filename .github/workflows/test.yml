@@ -15,22 +15,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up miniconda
-        uses: conda-incubator/setup-miniconda@v3
+      - name: Set up environment with Tasmanian
+        uses: mamba-org/setup-micromamba@v1
         with:
-          python-version: "3.11"
-          channels: conda-forge
-          channel-priority: strict
-          auto-activate-base: false
-          activate-environment: sparsepea-ci
+          environment-name: sparsepea-ci
+          create-args: >-
+            python=3.11
+            tasmanian
+            numpy
+            numba
+            pytest
+          init-shell: bash
+          cache-environment: true
 
-      - name: Install Tasmanian (conda-forge)
-        run: conda install -y -n sparsepea-ci -c conda-forge tasmanian
+      - name: Install package
+        run: pip install -e . --no-deps
 
-      - name: Install package and test dependencies
+      - name: Show environment
         run: |
-          pip install -e .
-          pip install pytest
+          python -c "import Tasmanian; print('Tasmanian:', Tasmanian.__version__ if hasattr(Tasmanian, '__version__') else 'imported OK')"
+          python -c "import sparsepea; print('sparsepea OK')"
 
       - name: Run tests
         run: pytest tests/ -v
