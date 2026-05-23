@@ -235,23 +235,37 @@ class tools:
         fig.text(0.53, 0.91, 'Policy Function', ha='center', fontsize=13)
         plt.show()
         
-    def plot_errors_3d(self, e):
-        '''This function plots the Euler residuals as a 3D surface alongside
-           their distribution in a side-by-side figure'''
-        
+    def compute_residuals(self, e):
+        '''Solve the model and return the Euler equation residual surface
+           on the fine plotting grid.
+
+        Returns
+        -------
+        ndarray
+            Absolute relative residuals shaped like ``xy_fine``.
+        '''
+
         model = self.model
         xy_fine = self.xy_fine
-        
-        e_grid, c_grid, μ_grid, st = self.compute_solution(e)
-        
+
+        e_grid, c_grid, μ_grid, _ = self.compute_solution(e)
+
         c_fine = self.policy_function(c_grid, grid=xy_fine)
         e_fine = self.policy_function(e_grid, grid=xy_fine)
         μ_fine = self.policy_function(μ_grid, grid=xy_fine)
-        
+
         c_implied = model.c_implied(e_fine, μ_fine, xy_fine[:, 1])
-        
+
         self.error = np.abs((c_fine - c_implied) / c_implied)
-        
+        return self.error
+
+    def plot_errors_3d(self, e):
+        '''This function plots the Euler residuals as a 3D surface alongside
+           their distribution in a side-by-side figure'''
+
+        xy_fine = self.xy_fine
+        error = self.compute_residuals(e)
+
         # Create side-by-side figure: 3D surface + histogram
         fig = plt.figure(figsize=(14, 5.5), dpi=100)
         gs = fig.add_gridspec(1, 2, width_ratios=[1.2, 1], wspace=0.25)
@@ -262,7 +276,7 @@ class tools:
 
         ax1.plot_surface(y_reg_mesh,
                         x_reg_mesh,
-                        self.error.T,
+                        error.T,
                         cmap='viridis',
                         alpha=0.7,
                         linewidth=0.0,
@@ -272,10 +286,10 @@ class tools:
         ax1.set_ylabel('State', fontsize=9, labelpad=10)
         ax1.tick_params(axis='both', labelsize=7)
         ax1.view_init(40, 135)
-        
+
         # Right panel: histogram of Euler residuals
         ax2 = fig.add_subplot(gs[1])
-        error_array = np.concatenate(self.error, axis=0)
+        error_array = np.concatenate(error, axis=0)
         ax2.hist(error_array, 50, color='#2196F3', alpha=0.75, edgecolor='white', linewidth=0.5)
         ax2.set_xlabel('$|\\varepsilon|$', fontsize=10)
         ax2.set_ylabel('Frequency', fontsize=10)
@@ -287,13 +301,16 @@ class tools:
         fig.suptitle('Euler Equation Residuals', fontsize=13, y=0.95)
         plt.show()
         
-    def plot_errors_dist(self):
-        '''This function plots the distribution of the Euler residuals.
-           Note: plot_errors_3d now includes the distribution as a side panel,
-           but this method is kept for backward compatibility.'''
-        
-        error = self.error
-        
+    def plot_errors_dist(self, error=None):
+        '''Plot the distribution of the Euler residuals.
+
+        Pass an explicit ``error`` array (from ``compute_residuals``) or rely
+        on the cached ``self.error`` left by a prior plot/compute call.
+        '''
+
+        if error is None:
+            error = self.error
+
         error_array = np.concatenate(error, axis=0)
         bins = 50
         fig, ax = plt.subplots(figsize=(7, 4), dpi=100)
