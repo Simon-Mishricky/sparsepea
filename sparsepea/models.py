@@ -38,7 +38,6 @@ import numpy as np
 from numba import float64, njit
 from numba.experimental import jitclass
 from math import erf, sqrt, pi, log, exp
-import quantecon.markov as qe
 
 
 # =============================================================================
