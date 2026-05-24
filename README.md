@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A Python solver for DSGE models with occasionally binding constraints, using the Parameterised Expectations Algorithm on [Tasmanian](https://tasmanian.ornl.gov/) sparse grids. Solves a calibrated DMP search model in under 60 seconds on a laptop, with Euler equation errors below 0.01%.
+A Python solver for DSGE models with occasionally binding constraints, using the Parameterised Expectations Algorithm on [Tasmanian](https://github.com/ORNL/TASMANIAN) sparse grids. Solves a calibrated DMP search model in under 60 seconds on a laptop, with Euler equation errors below 0.01%.
 
 ```python
 import numpy as np
@@ -28,11 +28,11 @@ Two problems make DSGE models hard to solve numerically:
 
 2. **Occasionally binding constraints.** Perturbation methods linearise around a steady state, which fails at the kink where a constraint starts binding. The PEA is a global projection method that checks complementarity conditions pointwise, so it handles the binding and non-binding regions simultaneously without smoothing or penalty functions.
 
-SparsePEA combines both, using [Tasmanian](https://tasmanian.ornl.gov/) for sparse grid construction and quadrature, and [Numba](https://numba.pydata.org/) `@jitclass` for JIT-compiled inner loops.
+SparsePEA combines both, using [Tasmanian](https://github.com/ORNL/TASMANIAN) for sparse grid construction and quadrature, and [Numba](https://numba.pydata.org/) `@jitclass` for JIT-compiled inner loops.
 
 ## Install
 
-SparsePEA depends on the [Tasmanian](https://tasmanian.ornl.gov/) sparse-grid library from Oak Ridge National Laboratory. Install it separately first:
+SparsePEA depends on the [Tasmanian](https://github.com/ORNL/TASMANIAN) sparse-grid library from Oak Ridge National Laboratory. Install it separately first:
 
 ```bash
 # macOS — Homebrew ships the Python bindings

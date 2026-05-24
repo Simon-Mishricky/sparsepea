@@ -13,7 +13,7 @@ The solver implements the following workflow:
 
 Dependencies
 ------------
-- Tasmanian (https://tasmanian.ornl.gov/) for sparse grid construction
+- Tasmanian (https://github.com/ORNL/TASMANIAN) for sparse grid construction
 - Matplotlib for 3D surface and histogram plots
 """
 
